@@ -2,6 +2,7 @@
 waypoints and geofence. Everything drawn is kept in map_items by name so it can be replaced or removed.
 Works without tkintermapview installed (self.map stays None and drawing is skipped)."""
 
+import webbrowser
 from tkinter import ttk
 
 from ..geo import circle_points, split_at_jumps, thin
@@ -16,7 +17,8 @@ except ImportError:  # the app still works without the map
 else:
     tkintermapview.map_widget.requests = TileRequests(tkintermapview.map_widget.requests)
 
-ROUTE_STYLE = {"color": "#9aa0a6", "width": 4}
+OSM_COPYRIGHT_URL = "https://www.openstreetmap.org/copyright"
+ROUTE_STYLE ={"color": "#9aa0a6", "width": 4}
 TRAIL_STYLE = {"color": "#1a73e8", "width": 5}
 
 
@@ -31,6 +33,10 @@ class MapMixin:
         if tkintermapview is None:
             ttk.Label(parent, text="Map unavailable: pip install tkintermapview").pack(expand=True)
             return
+        # The OSM tile policy requires visible attribution on the map.
+        credit = ttk.Label(parent, text="© OpenStreetMap contributors", foreground="#666", cursor="hand2")
+        credit.pack(side="bottom", anchor="e", padx=8, pady=(0, 4))
+        credit.bind("<Button-1>", lambda _e: webbrowser.open(OSM_COPYRIGHT_URL))
         self.map = tkintermapview.TkinterMapView(parent, corner_radius=0)
         self.map.set_tile_server(TILE_SERVER, max_zoom=19)
         self.map.pack(fill="both", expand=True, padx=6, pady=(0, 6))

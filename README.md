@@ -137,3 +137,26 @@ pymobiledevice3 still has to be installed on the machine running it.
 | `Device is password protected` / `DeviceLocked` | Unlock the phone and retry |
 | `Failed to start service` | Enable Developer Mode and click Auto-mount DDI |
 | `Device is not connected` | Phone not visible: check List devices / Check tunnel, see Wi-Fi notes |
+
+## Credits
+
+Spoofer is a front end; the hard parts are done by these projects and services:
+
+- **[pymobiledevice3](https://github.com/doronz88/pymobiledevice3)** by doronz88 and contributors
+  (GPL-3.0): all communication with the iPhone, including location simulation and the iOS 17+ tunnel.
+- **[OpenStreetMap](https://www.openstreetmap.org/copyright)**: map data © OpenStreetMap contributors,
+  available under the [Open Database License](https://opendatacommons.org/licenses/odbl/). Used for the
+  map tiles, address search and every route.
+- **[Nominatim](https://nominatim.org/)**: address search, via the OpenStreetMap Foundation's public server.
+- **[FOSSGIS e.V.](https://www.fossgis.de/)**: hosts the free public routing servers Spoofer uses:
+  - [OSRM](https://github.com/Project-OSRM/osrm-backend) for driving, cycling and fallback walking routes
+  - [Valhalla](https://github.com/valhalla/valhalla) for walking routes on footpaths and trails
+- **[TkinterMapView](https://github.com/TomSchimansky/TkinterMapView)** by Tom Schimansky (CC0): the map widget.
+- **[Requests](https://github.com/psf/requests)** (Apache-2.0) and **[Pillow](https://github.com/python-pillow/Pillow)**
+  (MIT-CMU): tile downloading and image handling for the map.
+- **[PyInstaller](https://pyinstaller.org/)** (GPL-2.0 with bootloader exception): builds `Spoofer.exe`.
+
+Please respect these services' usage policies
+([OSM tiles](https://operations.osmfoundation.org/policies/tiles/),
+[Nominatim](https://operations.osmfoundation.org/policies/nominatim/)). Spoofer sends an identifying
+User-Agent, limits address searches to one per second and caches map tiles to keep its load light.
