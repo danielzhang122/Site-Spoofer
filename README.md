@@ -2,7 +2,7 @@
 
 # Site Spoofer
 
-**[⬇ Download Spoofer.exe](https://github.com/danielzhang122/Spoofer/releases/latest)** (Windows)
+**[⬇ Download Spoofer.exe](https://github.com/danielzhang122/Site-Spoofer/releases/latest)** (Windows)
 
 A Windows desktop app (Tkinter) for setting a simulated GPS location on an iOS device
 during integration testing of location-aware apps. It's a GUI wrapper around
