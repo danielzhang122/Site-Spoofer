@@ -25,6 +25,7 @@ import threading
 import time
 import tkinter as tk
 from datetime import datetime, timedelta, timezone
+import urllib.error
 import urllib.parse
 import urllib.request
 from tkinter import filedialog, messagebox, simpledialog, ttk
@@ -112,8 +113,9 @@ ROAM_MODES = {  # name -> (default km/h, routing profile)
     "Drive (highway)": (100, "routed-car"),
 }
 ROAM_STEP_SECONDS = 1
-ROAM_LOOP_HOURS = 8  # a looping route is repeated in the GPX up to this long...
-ROAM_MAX_POINTS = 100_000  # ...or this many points, whichever is smaller
+ROAM_LOOP_HOURS = 8  # a looping route is repeated up to this long
+# Longest single run (one point per tick): ~4.6 days, enough to drive across Canada (~45 MB of points).
+ROAM_MAX_POINTS = 400_000
 GPX_PATH = os.path.join(tempfile.gettempdir(), "Spoofer", "route.gpx")
 
 
@@ -131,8 +133,76 @@ def random_point_near(center, radius_m):
     return center[0] + dlat, center[1] + dlon
 
 
+class RoutingError(Exception):
+    """The routing server couldn't route; code is OSRM's (e.g. 'NoRoute')."""
+
+    def __init__(self, code, message):
+        super().__init__(f"{message} ({code})")
+        self.code = code
+
+
+class ScenarioError(ValueError):
+    pass
+
+
+class RouteTooLongError(ScenarioError):
+    """The trip has more points than one run can hold; raised before any points are generated."""
+
+
+PROFILE_NAMES = {"routed-foot": "walking", "routed-bike": "cycling", "routed-car": "driving"}
+
+
+def _fmt_duration(secs):
+    if secs >= 2 * 86400:
+        return f"{secs / 86400:.1f} days"
+    if secs >= 3600:
+        return f"{secs / 3600:.0f} hours"
+    return f"{secs / 60:.0f} min"
+
+
+def check_trip_size(points_so_far, length_m, kmh, what):
+    """Raise RouteTooLongError if adding length_m at kmh would exceed ROAM_MAX_POINTS."""
+    step = kmh / 3.6 * ROAM_STEP_SECONDS
+    if points_so_far + length_m / step <= ROAM_MAX_POINTS:
+        return
+    total_m = points_so_far * step + length_m
+    cap_s = ROAM_MAX_POINTS * ROAM_STEP_SECONDS
+    highway_s = total_m / (100 / 3.6)
+    hint = (f"Drive (highway) would take about {_fmt_duration(highway_s)}, or pick closer waypoints."
+            if kmh < 100 and highway_s <= cap_s else "Pick closer waypoints.")
+    raise RouteTooLongError(f"{what} is {total_m / 1000:,.0f} km - about {_fmt_duration(total_m / (kmh / 3.6))} "
+                            f"at {kmh:g} km/h. Spoofer can play up to {_fmt_duration(cap_s)} per run. {hint}")
+
+
+def route_with_fallback(points, profile, log):
+    """Route on the chosen profile; if walking/cycling can't connect the points (typically a ferry
+    crossing, which only the driving graph includes), follow driving roads instead."""
+    try:
+        return route_on_roads(points, profile)
+    except RoutingError as exc:
+        if exc.code != "NoRoute" or profile == "routed-car":
+            raise
+    path = route_on_roads(points, "routed-car")
+    log(f"No {PROFILE_NAMES.get(profile, profile)} route between these points (usually a ferry crossing) - "
+        "following driving roads at your speed.", "info")
+    return path
+
+
+def _bridge_ends(path, start, end, log):
+    """OSRM snaps to the nearest road it can reach; if that's far from the requested start/end
+    (an island, the ocean), add the requested point so the track still ends where it should."""
+    gaps = [haversine_m(path[0], start), haversine_m(path[-1], end)]
+    if gaps[0] > 1000:
+        path = [start] + path
+    if gaps[1] > 1000:
+        path = path + [end]
+    if max(gaps) > 5000:
+        log(f"No road reaches part of this route - crossing {max(gaps) / 1000:,.0f} km in a straight line.", "err")
+    return path
+
+
 def route_chunked(points, profile, roads, log):
-    """Route through many points, ROUTE_MAX_COORDS at a time; straight lines where routing fails."""
+    """Route through many points, ROUTE_MAX_COORDS at a time; straight lines only where no road route exists."""
     path = []
     step = ROUTE_MAX_COORDS - 1
     for i in range(0, len(points) - 1, step):
@@ -140,9 +210,9 @@ def route_chunked(points, profile, roads, log):
         part = chunk
         if roads:
             try:
-                part = route_on_roads(chunk, profile)
+                part = _bridge_ends(route_with_fallback(chunk, profile, log), chunk[0], chunk[-1], log)
             except Exception as exc:  # noqa: BLE001 - fall back rather than fail the roam
-                log(f"Road routing failed ({exc}); using straight lines for this stretch.", "err")
+                log(f"No road route here ({exc}) - moving in a straight line for this stretch.", "err")
         path.extend(part if not path else part[1:])
     return path
 
@@ -203,10 +273,10 @@ def plan_legs(start, targets, profile, roads, kmh, log):
     step = kmh / 3.6 * ROAM_STEP_SECONDS
     for tgt in targets:
         path = route_chunked([track[-1], tgt[1:]], profile, roads, log)
+        length = sum(haversine_m(a, b) for a, b in zip(path, path[1:]))
+        check_trip_size(len(track), length, kmh, f"The trip to {tgt[0]}")  # before allocating the points
         track.extend(densify(path, step)[1:])
         ends.append((len(track) - 1, tgt))
-        if len(track) > ROAM_MAX_POINTS:
-            break
     return track, ends
 
 
@@ -308,10 +378,7 @@ def build_geofence_track(center, radius_m, speeds_kmh, passes, dwell_s, margin_m
     return track, marks
 
 
-# Scenarios: a tiny line-based script compiled into one continuous track.
-class ScenarioError(ValueError):
-    pass
-
+# Scenarios: a tiny line-based script compiled into one continuous track (ScenarioError is defined above).
 
 SCENARIO_EXAMPLE = """\
 # Spoofer scenario - one command per line, '#' starts a comment.
@@ -458,11 +525,18 @@ def compile_scenario(steps, start, resolve, log):
             track.append(pos)  # movement before any 'start' begins from the current coords
         marks.append((len(track), label, "step"))
         if st["op"] == "wait":
+            if len(track) + st["secs"] // ROAM_STEP_SECONDS > ROAM_MAX_POINTS:
+                raise ScenarioError(f"{label}: the scenario would run past {_fmt_duration(ROAM_MAX_POINTS * ROAM_STEP_SECONDS)}.")
             track.extend([pos] * (st["secs"] // ROAM_STEP_SECONDS))
         elif st["op"] == "move":
             dest = resolve(st["place"])
             profile = ROAM_MODES[st["mode"]][1]
             path = route_chunked([pos, dest], profile, roads, log)
+            length = sum(haversine_m(a, b) for a, b in zip(path, path[1:]))
+            try:
+                check_trip_size(len(track), length, st["kmh"], "This scenario")
+            except RouteTooLongError as exc:
+                raise ScenarioError(f"{label}: {exc}") from None
             track.extend(densify(path, st["kmh"] / 3.6 * ROAM_STEP_SECONDS)[1:])
         elif st["op"] == "wander":
             track.extend(generate_wander(pos, st["radius"], st["secs"], st["kmh"], "routed-foot", roads, True, log))
@@ -493,10 +567,17 @@ def route_on_roads(waypoints, profile):
     req = urllib.request.Request(
         ROUTE_URL.format(profile=profile, coords=coords), headers={"User-Agent": GEOCODE_USER_AGENT}
     )
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        # OSRM answers "no route" with HTTP 400 and a JSON body saying why.
+        try:
+            data = json.loads(exc.read().decode("utf-8"))
+        except ValueError:
+            raise RoutingError(f"HTTP {exc.code}", exc.reason) from None
     if data.get("code") != "Ok" or not data.get("routes"):
-        raise ValueError(data.get("message") or data.get("code") or "no route")
+        raise RoutingError(data.get("code") or "Error", data.get("message") or "no route")
     return [(lat, lon) for lon, lat in data["routes"][0]["geometry"]["coordinates"]]
 
 
@@ -1367,7 +1448,12 @@ class App(tk.Tk):
         self._log(f"Planning route through {len(wps)} waypoints at {kmh:g} km/h...")
 
         def worker():
-            track, ends = build_roam_track(wps[0][1:], wps[1:], wps, loop, profile, roads, kmh, self._log)
+            try:
+                track, ends = build_roam_track(wps[0][1:], wps[1:], wps, loop, profile, roads, kmh, self._log)
+            except Exception as exc:  # noqa: BLE001 - report it instead of leaving the buttons disabled
+                msg = str(exc)  # `exc` is unbound once the except block ends; the lambda runs later
+                self.log_queue.put(lambda: self._plan_failed("Roam", msg))
+                return
             plan = {"kind": "Route", "ends": [(0, wps[0])] + ends}
             self.log_queue.put(lambda: self._begin_roam(track, None, False, plan=plan))
 
@@ -1413,6 +1499,13 @@ class App(tk.Tk):
             self.log_queue.put(lambda: self._begin_roam(track, None, False, kind="Wander", plan={"kind": "Wander"}))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _plan_failed(self, title, msg):
+        """A route couldn't be planned: undo the 'planning' state and tell the user why."""
+        self._set_planning(False)
+        self.roam_paused = False
+        self._log(f"{title}: {msg.splitlines()[0]}", "err")
+        messagebox.showerror(title, msg)
 
     def _set_planning(self, busy):
         for btn in self.planning_buttons:
@@ -1549,8 +1642,13 @@ class App(tk.Tk):
         pos = self._roam_position()
 
         def worker():
-            track, ends = build_roam_track(pos, remaining, wps, loop and len(wps) >= 2, profile, roads, kmh,
-                                           self._log)
+            try:
+                track, ends = build_roam_track(pos, remaining, wps, loop and len(wps) >= 2, profile, roads, kmh,
+                                               self._log)
+            except Exception as exc:  # noqa: BLE001 - keep the current route playing
+                msg = f"{exc}\n\nKept the current route."  # bind now: `exc` is unbound after the block
+                self.log_queue.put(lambda: self._plan_failed("Live update", msg))
+                return
             self.log_queue.put(lambda: self._splice_route(track, ends, reached, len(remaining), kmh, loop))
 
         threading.Thread(target=worker, daemon=True).start()
@@ -1743,7 +1841,8 @@ class App(tk.Tk):
             try:
                 track, marks, clear_at_end = compile_scenario(steps, start, resolve, self._log)
             except ScenarioError as exc:
-                self.log_queue.put(lambda: self._scenario_failed(str(exc)))
+                msg = str(exc)  # bind now: `exc` is unbound once the except block ends
+                self.log_queue.put(lambda: self._scenario_failed(msg))
                 return
             self.log_queue.put(lambda: self._scenario_ready(track, marks, clear_at_end, run))
 
