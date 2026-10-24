@@ -446,7 +446,7 @@ class App(tk.Tk):
         addr_entry.bind("<Return>", lambda _e: self.search_address())
         self.search_btn = ttk.Button(coords, text="Search", command=self.search_address)
         self.search_btn.grid(row=0, column=4, **pad)
-        ttk.Button(coords, text="Search && Set", command=lambda: self.search_address(then_set=True)).grid(
+        ttk.Button(coords, text="Search & Set", command=lambda: self.search_address(then_set=True)).grid(
             row=0, column=5, **pad
         )
         ttk.Label(coords, text="Matches:").grid(row=1, column=0, sticky="w", **pad)
