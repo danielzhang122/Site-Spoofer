@@ -15,12 +15,15 @@ during integration testing of location-aware apps. It's a GUI wrapper around
 - **Address search** via OpenStreetMap Nominatim (no API key; pick from up to 5 matches)
 - **Bookmarks** saved to `%APPDATA%\Spoofer\bookmarks.json` (set, load, rename, delete)
 - **Roaming**: move along a multi-waypoint route at walk/run/cycle/drive speed, following real
-  roads (OSM routing) or straight lines, optionally looping; resumes mid-route after a dropped connection.
+  roads (OSM routing) or straight lines, optionally looping until stopped; resumes mid-route after a
+  dropped connection. Walking and running prefer footpaths, park paths and trails over streets.
+  No caps on speed, distance or duration
   **Edits apply live**: change the speed, mode, roads, loop or waypoints mid-roam and it re-plans from
   where the phone is now, without restarting or dropping the session
 - **Wander**: walk randomly around a point within a radius for a set time, with occasional pauses
 - **Live map**: click to pick coordinates; right-click to set the location, add a waypoint or place a
-  geofence; watch the phone's position, planned route and travelled trail update in real time
+  geofence; watch the phone's position, planned route and travelled trail update in real time.
+  Map tiles are cached in `%LOCALAPPDATA%\Spoofer\tiles` so places you've seen load instantly
 - **Scenarios**: script a repeatable test (`start`, `wait`, `walk/drive to`, `wander`, `clear`) and run
   it as one continuous session, with each step logged as it happens
 - **Geofence tester**: crosses a circular region at several speeds and headings and logs every
@@ -28,7 +31,7 @@ during integration testing of location-aware apps. It's a GUI wrapper around
 - Preset waypoints, including edge cases (Null Island, antimeridian, near-polar)
 - Commands run in background threads; stdout/stderr streamed to a colour-coded log (savable)
 - Holds the DVT session open so the simulated location persists, and stops it cleanly on Clear/exit
-- Works over **USB or Wi-Fi**, with optional auto-reconnect when a Wi-Fi session drops
+- Works over **USB or Wi-Fi**, with optional auto-reconnect (keeps retrying) when a Wi-Fi session drops
 - Helper buttons: start the iOS 17+ tunnel (elevated), check tunnel status, list devices, auto-mount the Developer Disk Image
 
 ## Requirements
@@ -109,6 +112,7 @@ pyinstaller Spoofer.spec
 
 The executable lands in `dist\Spoofer.exe`, with the icon from `assets/icon.ico` embedded.
 pymobiledevice3 still has to be installed on the machine running it.
+
 
 ## Troubleshooting
 

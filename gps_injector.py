@@ -11,6 +11,7 @@ Requirements on the workstation:
         python -m pymobiledevice3 remote tunneld
 """
 
+import io
 import json
 import math
 import os
@@ -62,7 +63,6 @@ PRESETS = [
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 TUNNELD_URL = "http://127.0.0.1:49151/"
 RECONNECT_DELAY_MS = 5000
-MAX_RECONNECTS = 10
 
 # OpenStreetMap Nominatim: free, no key. Its usage policy requires an identifying
 # User-Agent and at most 1 request per second.
@@ -70,16 +70,58 @@ GEOCODE_URL = "https://nominatim.openstreetmap.org/search"
 GEOCODE_USER_AGENT = "Spoofer/1.0 (iOS location QA tool)"
 GEOCODE_MIN_INTERVAL = 1.0
 
+TILE_SERVER = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+TILE_CACHE_DIR = os.path.join(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir(), "Spoofer", "tiles")
+TILE_MAX_AGE_S = 7 * 86400  # OSM's tile policy asks clients to keep tiles at least this long
+
+
+class _Tile:
+    """Just enough of a requests.Response for tkintermapview, which only reads .raw."""
+
+    def __init__(self, data):
+        self.raw = io.BytesIO(data)
+
+
 class _TileRequests:
     """tkintermapview fetches tiles with a generic User-Agent that OpenStreetMap's tile servers
-    block (they answer with an 'Access blocked' image), so send an identifying one instead."""
+    block (they answer with an 'Access blocked' image), so send an identifying one instead.
+    It also opens a new HTTPS connection per tile and caches nothing between runs, so share one
+    keep-alive session across its loader threads and keep tiles on disk."""
 
     def __init__(self, real):
         self._real = real
+        self._session = real.Session()
+        self._session.headers["User-Agent"] = GEOCODE_USER_AGENT
+        self._session.mount("https://", real.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=32))
 
     def get(self, url, **kwargs):
-        kwargs["headers"] = {**kwargs.get("headers", {}), "User-Agent": GEOCODE_USER_AGENT}
-        return self._real.get(url, **kwargs)
+        parts = urllib.parse.urlsplit(url)
+        path = os.path.join(TILE_CACHE_DIR, parts.netloc, *parts.path.strip("/").split("/"))
+        try:
+            fresh = time.time() - os.path.getmtime(path) < TILE_MAX_AGE_S
+            with open(path, "rb") as f:
+                cached = f.read()
+        except OSError:
+            fresh, cached = False, None
+        if fresh:
+            return _Tile(cached)
+        try:
+            resp = self._session.get(url, timeout=10)
+        except self._real.RequestException:
+            if cached is None:
+                raise
+            return _Tile(cached)  # offline: a stale tile beats a blank one
+        if resp.status_code != 200 or not resp.headers.get("Content-Type", "").startswith("image/"):
+            return _Tile(cached if cached is not None else resp.content)
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = f"{path}.{threading.get_ident()}.tmp"  # loader threads may race on the same tile
+            with open(tmp, "wb") as f:
+                f.write(resp.content)
+            os.replace(tmp, path)
+        except OSError:
+            pass  # caching is best-effort
+        return _Tile(resp.content)
 
     def __getattr__(self, name):
         return getattr(self._real, name)
@@ -113,9 +155,6 @@ ROAM_MODES = {  # name -> (default km/h, routing profile)
     "Drive (highway)": (100, "routed-car"),
 }
 ROAM_STEP_SECONDS = 1
-ROAM_LOOP_HOURS = 8  # a looping route is repeated up to this long
-# Longest single run (one point per tick): ~4.6 days, enough to drive across Canada (~45 MB of points).
-ROAM_MAX_POINTS = 400_000
 GPX_PATH = os.path.join(tempfile.gettempdir(), "Spoofer", "route.gpx")
 
 
@@ -145,38 +184,76 @@ class ScenarioError(ValueError):
     pass
 
 
-class RouteTooLongError(ScenarioError):
-    """The trip has more points than one run can hold; raised before any points are generated."""
-
-
 PROFILE_NAMES = {"routed-foot": "walking", "routed-bike": "cycling", "routed-car": "driving"}
 
+# Walking/running goes through FOSSGIS Valhalla (same OSM data, no key), whose pedestrian model can be
+# told to prefer footways, park paths and trails over walking beside roads; OSRM's foot profile is the
+# fallback (e.g. past Valhalla's 100 km pedestrian limit).
+FOOT_ROUTE_URL = "https://valhalla1.openstreetmap.de/route"
+FOOT_COSTING = {  # factors below 1 make that kind of way preferred
+    "walkway_factor": 0.5,
+    "sidewalk_factor": 0.8,
+    "use_tracks": 1.0,
+    "use_living_streets": 0.8,
+    "max_hiking_difficulty": 6,  # the default (1) skips most hiking trails
+}
 
-def _fmt_duration(secs):
-    if secs >= 2 * 86400:
-        return f"{secs / 86400:.1f} days"
-    if secs >= 3600:
-        return f"{secs / 3600:.0f} hours"
-    return f"{secs / 60:.0f} min"
+
+def decode_polyline6(shape):
+    """Decode a Valhalla polyline (precision 6) into [(lat, lon), ...]."""
+    coords, idx, lat, lon = [], 0, 0, 0
+    while idx < len(shape):
+        deltas = []
+        for _ in range(2):
+            shift = result = 0
+            while True:
+                b = ord(shape[idx]) - 63
+                idx += 1
+                result |= (b & 0x1F) << shift
+                shift += 5
+                if b < 0x20:
+                    break
+            deltas.append(~(result >> 1) if result & 1 else result >> 1)
+        lat, lon = lat + deltas[0], lon + deltas[1]
+        coords.append((lat / 1e6, lon / 1e6))
+    return coords
 
 
-def check_trip_size(points_so_far, length_m, kmh, what):
-    """Raise RouteTooLongError if adding length_m at kmh would exceed ROAM_MAX_POINTS."""
-    step = kmh / 3.6 * ROAM_STEP_SECONDS
-    if points_so_far + length_m / step <= ROAM_MAX_POINTS:
-        return
-    total_m = points_so_far * step + length_m
-    cap_s = ROAM_MAX_POINTS * ROAM_STEP_SECONDS
-    highway_s = total_m / (100 / 3.6)
-    hint = (f"Drive (highway) would take about {_fmt_duration(highway_s)}, or pick closer waypoints."
-            if kmh < 100 and highway_s <= cap_s else "Pick closer waypoints.")
-    raise RouteTooLongError(f"{what} is {total_m / 1000:,.0f} km - about {_fmt_duration(total_m / (kmh / 3.6))} "
-                            f"at {kmh:g} km/h. Spoofer can play up to {_fmt_duration(cap_s)} per run. {hint}")
+def route_on_foot(waypoints):
+    """Walking route through the waypoints, preferring paths and trails to streets."""
+    body = json.dumps({
+        "locations": [{"lat": lat, "lon": lon} for lat, lon in waypoints],
+        "costing": "pedestrian",
+        "costing_options": {"pedestrian": FOOT_COSTING},
+        "directions_type": "none",
+    }).encode("utf-8")
+    req = urllib.request.Request(FOOT_ROUTE_URL, data=body, headers={
+        "User-Agent": GEOCODE_USER_AGENT, "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        # Valhalla answers "no route" / "too far" with HTTP 400 and a JSON body saying why.
+        try:
+            data = json.loads(exc.read().decode("utf-8"))
+        except ValueError:
+            raise RoutingError(f"HTTP {exc.code}", exc.reason) from None
+        raise RoutingError(data.get("error_code", f"HTTP {exc.code}"), data.get("error") or exc.reason) from None
+    path = []
+    for leg in data["trip"]["legs"]:
+        pts = decode_polyline6(leg["shape"])
+        path.extend(pts if not path else pts[1:])
+    return path
 
 
 def route_with_fallback(points, profile, log):
     """Route on the chosen profile; if walking/cycling can't connect the points (typically a ferry
     crossing, which only the driving graph includes), follow driving roads instead."""
+    if profile == "routed-foot":
+        try:
+            return route_on_foot(points)
+        except Exception as exc:  # noqa: BLE001 - street routing below still has a go
+            log(f"No footpath route here ({exc}) - trying street routing.", "info")
     try:
         return route_on_roads(points, profile)
     except RoutingError as exc:
@@ -273,24 +350,20 @@ def plan_legs(start, targets, profile, roads, kmh, log):
     step = kmh / 3.6 * ROAM_STEP_SECONDS
     for tgt in targets:
         path = route_chunked([track[-1], tgt[1:]], profile, roads, log)
-        length = sum(haversine_m(a, b) for a, b in zip(path, path[1:]))
-        check_trip_size(len(track), length, kmh, f"The trip to {tgt[0]}")  # before allocating the points
         track.extend(densify(path, step)[1:])
         ends.append((len(track) - 1, tgt))
     return track, ends
 
 
 def build_roam_track(pos, remaining, lap, loop, profile, roads, kmh, log):
-    """Track from pos through the remaining waypoints; when looping, back to lap[0] and then full laps."""
+    """Track from pos through the remaining waypoints (back to lap[0] when looping).
+    Returns (track, ends, lap) where lap is (lap_track, lap_ends) to repeat forever, or None."""
     track, ends = plan_legs(pos, remaining + ([lap[0]] if loop and lap else []), profile, roads, kmh, log)
     if loop and len(lap) >= 2:
         lap_track, lap_ends = plan_legs(lap[0][1:], lap[1:] + [lap[0]], profile, roads, kmh, log)
-        cap = min(ROAM_MAX_POINTS, ROAM_LOOP_HOURS * 3600 // ROAM_STEP_SECONDS)
-        while len(lap_track) > 1 and len(track) + len(lap_track) - 1 <= cap:
-            offset = len(track) - 1
-            track.extend(lap_track[1:])
-            ends.extend((i + offset, t) for i, t in lap_ends)
-    return track, ends
+        if len(lap_track) > 1:
+            return track, ends, (lap_track, lap_ends)
+    return track, ends, None
 
 
 def generate_wander(center, radius_m, secs, kmh, profile, roads, pauses, log):
@@ -298,7 +371,7 @@ def generate_wander(center, radius_m, secs, kmh, profile, roads, pauses, log):
     # Pick random stops until the straight-line distance covers the walk; roads only make it longer.
     need_m = kmh / 3.6 * secs
     stops, dist = [center], 0.0
-    while dist < need_m and len(stops) < 500:
+    while dist < need_m:
         nxt = random_point_near(center, radius_m)
         dist += haversine_m(stops[-1], nxt)
         stops.append(nxt)
@@ -456,8 +529,8 @@ def _take_speed(rest):
     if not m:
         return rest, None
     kmh = float(m.group(1))
-    if not 0 < kmh <= 1000:
-        raise ScenarioError("speed must be between 0 and 1000 km/h")
+    if kmh <= 0:
+        raise ScenarioError("speed must be more than 0 km/h")
     return rest[:m.start()], kmh
 
 
@@ -525,18 +598,11 @@ def compile_scenario(steps, start, resolve, log):
             track.append(pos)  # movement before any 'start' begins from the current coords
         marks.append((len(track), label, "step"))
         if st["op"] == "wait":
-            if len(track) + st["secs"] // ROAM_STEP_SECONDS > ROAM_MAX_POINTS:
-                raise ScenarioError(f"{label}: the scenario would run past {_fmt_duration(ROAM_MAX_POINTS * ROAM_STEP_SECONDS)}.")
             track.extend([pos] * (st["secs"] // ROAM_STEP_SECONDS))
         elif st["op"] == "move":
             dest = resolve(st["place"])
             profile = ROAM_MODES[st["mode"]][1]
             path = route_chunked([pos, dest], profile, roads, log)
-            length = sum(haversine_m(a, b) for a, b in zip(path, path[1:]))
-            try:
-                check_trip_size(len(track), length, st["kmh"], "This scenario")
-            except RouteTooLongError as exc:
-                raise ScenarioError(f"{label}: {exc}") from None
             track.extend(densify(path, st["kmh"] / 3.6 * ROAM_STEP_SECONDS)[1:])
         elif st["op"] == "wander":
             track.extend(generate_wander(pos, st["radius"], st["secs"], st["kmh"], "routed-foot", roads, True, log))
@@ -546,8 +612,6 @@ def compile_scenario(steps, start, resolve, log):
             clear_at_end = True
         if track:
             pos = track[-1]
-        if len(track) > ROAM_MAX_POINTS:
-            raise ScenarioError(f"Scenario is longer than {ROAM_MAX_POINTS * ROAM_STEP_SECONDS // 3600} hours.")
     if not track:
         raise ScenarioError("The scenario never goes anywhere - add a start, wait or move command.")
     # A mark past the end (e.g. a trailing 'roads' or 'clear') would never fire; pin it to the last point.
@@ -852,6 +916,7 @@ class App(tk.Tk):
         self.roam_step = ""
         self.roam_on_finish = None
         self.roam_plan = None  # what a live edit can re-plan: {"kind": "Route"/"Wander", "ends": [...]}
+        self.roam_lap = None  # (lap_track, lap_ends) appended each time a looping route runs out
         self.roam_paused = False
         self.roam_lock = threading.Lock()  # roam_track/roam_done are shared with the player thread
         self.live_ready = threading.Event()  # set once the live helper has connected
@@ -1104,6 +1169,7 @@ class App(tk.Tk):
             ttk.Label(parent, text="Map unavailable: pip install tkintermapview").pack(expand=True)
             return
         self.map = tkintermapview.TkinterMapView(parent, corner_radius=0)
+        self.map.set_tile_server(TILE_SERVER, max_zoom=19)
         self.map.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         try:
             lat, lon = self._read_coords()
@@ -1163,7 +1229,7 @@ class App(tk.Tk):
             with self.roam_lock:
                 del self.roam_track[self.roam_done:]
                 self.roam_track.append((lat, lon))
-                self.roam_marks, self.roam_plan, self.roam_on_finish = {}, None, None
+                self.roam_marks, self.roam_plan, self.roam_on_finish, self.roam_lap = {}, None, None, None
             self._clear_route_drawing()
             self._log(f"Moved to {lat:.6f}, {lon:.6f} (live)")
             return
@@ -1204,12 +1270,9 @@ class App(tk.Tk):
             return
         if ran_for > 30:
             self.retries = 0  # it had been holding fine, so this is a fresh drop
-        if self.retries >= MAX_RECONNECTS:
-            self._log(f"Gave up reconnecting after {MAX_RECONNECTS} attempts.", "err")
-            return
         self.retries += 1
         self._log(f"Session lost - reconnecting in {RECONNECT_DELAY_MS // 1000}s "
-                  f"(attempt {self.retries}/{MAX_RECONNECTS})", "info")
+                  f"(attempt {self.retries})", "info")
         self.after(
             RECONNECT_DELAY_MS,
             lambda: sid == self.session_id and self._start_session(make_args, sid, label, line_cb),
@@ -1438,7 +1501,7 @@ class App(tk.Tk):
             kmh = self._roam_speed()
             self._base()
         except ValueError:
-            messagebox.showerror("Roam", "Speed must be a number of km/h between 0 and 1000.")
+            messagebox.showerror("Roam", "Speed must be a number of km/h above 0.")
             return
         wps = list(self.roam_waypoints)
         loop = self.roam_loop_var.get()
@@ -1449,19 +1512,19 @@ class App(tk.Tk):
 
         def worker():
             try:
-                track, ends = build_roam_track(wps[0][1:], wps[1:], wps, loop, profile, roads, kmh, self._log)
+                track, ends, lap = build_roam_track(wps[0][1:], wps[1:], wps, loop, profile, roads, kmh, self._log)
             except Exception as exc:  # noqa: BLE001 - report it instead of leaving the buttons disabled
                 msg = str(exc)  # `exc` is unbound once the except block ends; the lambda runs later
                 self.log_queue.put(lambda: self._plan_failed("Roam", msg))
                 return
             plan = {"kind": "Route", "ends": [(0, wps[0])] + ends}
-            self.log_queue.put(lambda: self._begin_roam(track, None, False, plan=plan))
+            self.log_queue.put(lambda: self._begin_roam(track, None, False, plan=plan, lap=lap))
 
         threading.Thread(target=worker, daemon=True).start()
 
     def _roam_speed(self):
         kmh = float(self.roam_speed_var.get())
-        if not 0 < kmh <= 1000:
+        if not kmh > 0:
             raise ValueError
         return kmh
 
@@ -1479,15 +1542,15 @@ class App(tk.Tk):
         try:
             kmh = self._roam_speed()
         except ValueError:
-            messagebox.showerror("Wander", "Speed must be a number of km/h between 0 and 1000.")
+            messagebox.showerror("Wander", "Speed must be a number of km/h above 0.")
             return
         try:
             radius = float(self.wander_radius_var.get())
             minutes = float(self.wander_minutes_var.get())
-            if not (20 <= radius <= 20_000 and 1 <= minutes <= ROAM_LOOP_HOURS * 60):
+            if not (radius > 0 and minutes > 0):
                 raise ValueError
         except ValueError:
-            messagebox.showerror("Wander", f"Radius must be 20-20000 m and duration 1-{ROAM_LOOP_HOURS * 60} min.")
+            messagebox.showerror("Wander", "Radius (m) and duration (min) must be numbers above 0.")
             return
         profile = ROAM_MODES[self.roam_mode_var.get()][1]
         roads, pauses = self.roam_roads_var.get(), self.wander_pause_var.get()
@@ -1515,7 +1578,7 @@ class App(tk.Tk):
         """True while a live session is connected and taking points."""
         return self.roam_sid == self.session_id and self.pm.is_active() and self.live_ready.is_set()
 
-    def _begin_roam(self, track, dist, loop, kind="Route", marks=(), on_finish=None, plan=None):
+    def _begin_roam(self, track, dist, loop, kind="Route", marks=(), on_finish=None, plan=None, lap=None):
         """Start playing a track. Reuses a connected live session, so switching routes has no gap."""
         self._set_planning(False)
         with self.roam_lock:
@@ -1527,12 +1590,14 @@ class App(tk.Tk):
             self.roam_step = ""
             self.roam_on_finish = on_finish
             self.roam_plan = plan
+            self.roam_lap = lap
             self.roam_paused = False
         self.sim_pos = None
-        self._draw_route(self.roam_track)
+        self._draw_route(self._planned_route())
         if dist is None:
             dist = sum(haversine_m(a, b) for a, b in zip(track, track[1:]))
-        self._log(f"{kind}: {dist / 1000:.2f} km, {timedelta(seconds=len(track) * ROAM_STEP_SECONDS)}", "ok")
+        self._log(f"{kind}: {dist / 1000:.2f} km, {timedelta(seconds=len(track) * ROAM_STEP_SECONDS)}"
+                  + (", then looping until stopped" if lap else ""), "ok")
         if self._live_ok():
             return  # the player thread picks up the new track on its next tick
         self.session_id += 1
@@ -1568,6 +1633,13 @@ class App(tk.Tk):
         """Send the next point of the track and fire any marks / end-of-track callback it reaches."""
         with self.roam_lock:
             done = self.roam_done
+            if done >= len(self.roam_track) and self.roam_lap:
+                # Looping: run another lap (it starts where the track ends, at the first waypoint).
+                lap_track, lap_ends = self.roam_lap
+                offset = len(self.roam_track) - 1
+                self.roam_track.extend(lap_track[1:])
+                if self.roam_plan:
+                    self.roam_plan["ends"].extend((i + offset, t) for i, t in lap_ends)
             if done >= len(self.roam_track):
                 return  # finished: the device keeps the last point
             lat, lon = self.roam_track[done]
@@ -1590,14 +1662,22 @@ class App(tk.Tk):
             return self.roam_track[self.roam_done - 1]
         return self.roam_track[0] if self.roam_track else None
 
+    def _roam_moving(self):
+        return self.roam_done < len(self.roam_track) or self.roam_lap is not None
+
+    def _planned_route(self):
+        """The track still to play, plus one lap when looping, for drawing."""
+        lap = self.roam_lap
+        return self.roam_track + (lap[0][1:] if lap else [])
+
     def stop_roam(self):
-        if self.roam_sid != self.session_id or self.roam_done >= len(self.roam_track):
+        if self.roam_sid != self.session_id or not self._roam_moving():
             messagebox.showinfo("Roam", "Not moving right now.")
             return
         with self.roam_lock:
             # Drop the rest of the route; the live session keeps holding the current point (no gap).
             del self.roam_track[max(self.roam_done, 1):]
-            self.roam_marks, self.roam_plan, self.roam_on_finish = {}, None, None
+            self.roam_marks, self.roam_plan, self.roam_on_finish, self.roam_lap = {}, None, None, None
         pos = self._roam_position()
         self._fill_coords("Roam stop", *pos)
         self._draw_route(self.roam_track, fit=False)
@@ -1615,7 +1695,7 @@ class App(tk.Tk):
     def _apply_live_edit(self):
         self._edit_job = None
         plan = self.roam_plan
-        if not plan or self.roam_sid != self.session_id or self.roam_done >= len(self.roam_track):
+        if not plan or self.roam_sid != self.session_id or not self._roam_moving():
             return
         try:
             kmh = self._roam_speed()
@@ -1643,17 +1723,17 @@ class App(tk.Tk):
 
         def worker():
             try:
-                track, ends = build_roam_track(pos, remaining, wps, loop and len(wps) >= 2, profile, roads, kmh,
-                                               self._log)
+                track, ends, lap = build_roam_track(pos, remaining, wps, loop and len(wps) >= 2, profile, roads,
+                                                    kmh, self._log)
             except Exception as exc:  # noqa: BLE001 - keep the current route playing
                 msg = f"{exc}\n\nKept the current route."  # bind now: `exc` is unbound after the block
                 self.log_queue.put(lambda: self._plan_failed("Live update", msg))
                 return
-            self.log_queue.put(lambda: self._splice_route(track, ends, reached, len(remaining), kmh, loop))
+            self.log_queue.put(lambda: self._splice_route(track, ends, lap, len(remaining), kmh))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _splice_route(self, track, ends, reached, n_remaining, kmh, loop):
+    def _splice_route(self, track, ends, lap, n_remaining, kmh):
         """Replace everything after the current point with the re-planned track."""
         with self.roam_lock:
             done = max(self.roam_done, 1)
@@ -1662,12 +1742,14 @@ class App(tk.Tk):
             if self.roam_plan:
                 self.roam_plan["ends"] = ([(i, t) for i, t in self.roam_plan["ends"] if i < done]
                                           + [(i + base, t) for i, t in ends])
+            self.roam_lap = lap
             self.roam_paused = False
-        self._draw_route(self.roam_track, fit=False)
-        if len(track) > 1:
+        self._draw_route(self._planned_route(), fit=False)
+        if lap:
+            self._log(f"Live update: {n_remaining} waypoint(s) ahead at {kmh:g} km/h, looping until stopped", "ok")
+        elif len(track) > 1:
             left = timedelta(seconds=(len(track) - 1) * ROAM_STEP_SECONDS)
-            self._log(f"Live update: {n_remaining} waypoint(s) ahead at {kmh:g} km/h"
-                      + (", looping" if loop else "") + f" - {left} to go", "ok")
+            self._log(f"Live update: {n_remaining} waypoint(s) ahead at {kmh:g} km/h - {left} to go", "ok")
         else:
             self._log("Live update: no waypoints left ahead - holding here", "ok")
 
@@ -1892,12 +1974,12 @@ class App(tk.Tk):
             dwell = float(self.gf_dwell_var.get())
         except ValueError:
             raise ValueError("Radius, distance, passes and dwell must be numbers; speeds a comma-separated list.")
-        if not (10 <= radius <= 50_000 and 10 <= margin <= 50_000):
-            raise ValueError("Radius and start distance must be between 10 m and 50 km.")
-        if not speeds or not all(0 < s <= 1000 for s in speeds):
-            raise ValueError("Give at least one speed between 0 and 1000 km/h.")
-        if not (1 <= passes <= 50 and 0 <= dwell <= 3600):
-            raise ValueError("Passes must be 1-50 and dwell 0-3600 s.")
+        if not (radius > 0 and margin > 0):
+            raise ValueError("Radius and start distance must be above 0 m.")
+        if not speeds or not all(s > 0 for s in speeds):
+            raise ValueError("Give at least one speed above 0 km/h.")
+        if not (passes >= 1 and dwell >= 0):
+            raise ValueError("Passes must be at least 1 and dwell 0 s or more.")
         return radius, margin, speeds, passes, dwell
 
     def _draw_fence(self):
@@ -2050,7 +2132,10 @@ class App(tk.Tk):
         active = self.pm.is_active()
         if active and self.roam_sid == self.session_id and self.roam_track:
             total, done = len(self.roam_track), self.roam_done
-            if done >= total:
+            if self.roam_lap:
+                self.status_var.set("Roaming (looping until stopped)"
+                                    + (f"   ·   {self.roam_step}" if self.roam_step else ""))
+            elif done >= total:
                 self.status_var.set("Holding position (live session)")
             else:
                 left = (total - done) * ROAM_STEP_SECONDS
