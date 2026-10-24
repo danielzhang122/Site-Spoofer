@@ -8,6 +8,11 @@ during integration testing of location-aware apps. It's a GUI wrapper around
 ## Features
 
 - Latitude/longitude input with range validation, plus **Set** / **Clear** location
+- **Address search** via OpenStreetMap Nominatim (no API key; pick from up to 5 matches)
+- **Bookmarks** saved to `%APPDATA%\Spoofer\bookmarks.json` (set, load, rename, delete)
+- **Roaming**: move along a multi-waypoint route at walk/run/cycle/drive speed, following real
+  roads (OSM routing) or straight lines, optionally looping; resumes mid-route after a dropped connection
+- **Wander**: walk randomly around a point within a radius for a set time, with occasional pauses
 - Preset waypoints, including edge cases (Null Island, antimeridian, near-polar)
 - Commands run in background threads; stdout/stderr streamed to a colour-coded log (savable)
 - Holds the DVT session open so the simulated location persists, and stops it cleanly on Clear/exit
