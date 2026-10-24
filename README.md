@@ -138,6 +138,20 @@ pymobiledevice3 still has to be installed on the machine running it.
 | `Failed to start service` | Enable Developer Mode and click Auto-mount DDI |
 | `Device is not connected` | Phone not visible: check List devices / Check tunnel, see Wi-Fi notes |
 
+## Potential to do
+
+Ideas that might be added later, with no promises on whether or when:
+
+- **Always-on station**: Spoofer could run around the clock on a Raspberry Pi or an old PC with an old
+  iPad/iPhone plugged in over USB, so a location or route keeps playing without tying up a main computer.
+  It would probably need:
+  - Headless mode: start a location, route or scenario from the command line or a config file, without the window
+  - Linux support (Raspberry Pi OS): run tunneld as a system service in place of the Windows-only
+    "Start tunnel (admin)" button
+  - Start on boot and recover by itself: re-mount the DDI after the device reboots, reconnect after USB drops
+  - Remote control: a small web page on the local network to change the location or route and see the status
+  - Setup guide: wiring, powered USB hub, keeping the device charged, and stopping the device from sleeping
+
 ## Credits
 
 Spoofer is a front end; the hard parts are done by these projects and services:
