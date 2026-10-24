@@ -113,6 +113,20 @@ pyinstaller Spoofer.spec
 The executable lands in `dist\Spoofer.exe`, with the icon from `assets/icon.ico` embedded.
 pymobiledevice3 still has to be installed on the machine running it.
 
+## Project layout
+
+`gps_injector.py` is just the entry point; the app is the `spoofer/` package:
+
+| Module | What it does |
+|---|---|
+| `geo.py` | Distance, resampling and bearing maths on (lat, lon) points |
+| `net.py` | HTTP helper, address search, map-tile cache |
+| `routing.py` | Road routing (OSRM) and footpath routing (Valhalla), with fallbacks |
+| `tracks.py` | Turns routes into one-point-per-second tracks: roam, wander, geofence passes |
+| `scenario.py` | The scenario language: parse and compile into a track |
+| `device.py` | Runs pymobiledevice3 and the live-session helper |
+| `bookmarks.py` | Loads and saves `bookmarks.json` |
+| `ui/` | The window: `app.py` assembles one mixin per area (`connection`, `places`, `roam`, `scenario_tab`, `geofence_tab`, `map_view`) plus shared `widgets` |
 
 ## Troubleshooting
 
