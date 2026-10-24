@@ -1,6 +1,6 @@
 <p align="center"><img src="assets/icon.png" width="128" alt="Spoofer icon"></p>
 
-# Spoofer
+# Site Spoofer
 
 **[⬇ Download Spoofer.exe](https://github.com/danielzhang122/Spoofer/releases/latest)** (Windows)
 
