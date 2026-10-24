@@ -1,4 +1,8 @@
+<p align="center"><img src="assets/icon.png" width="128" alt="Spoofer icon"></p>
+
 # Spoofer
+
+**[⬇ Download Spoofer.exe](https://github.com/danielzhang122/Spoofer/releases/latest)** (Windows)
 
 A Windows desktop app (Tkinter) for setting a simulated GPS location on an iOS device
 during integration testing of location-aware apps. It's a GUI wrapper around
@@ -21,8 +25,9 @@ during integration testing of location-aware apps. It's a GUI wrapper around
 
 ## Requirements
 
-- Windows with Python 3.10+
-- `pip install pymobiledevice3` (called as an external CLI, not bundled)
+- Windows. Python 3.10+ is needed even when using the .exe, because the app drives the
+  pymobiledevice3 command-line tool rather than bundling it
+- `pip install pymobiledevice3`
 - Apple's USB driver: install **Apple Devices** (Microsoft Store) or iTunes
 - iPhone trusted on this PC, with **Developer Mode** enabled
   (`python -m pymobiledevice3 amfi reveal-developer-mode`, then turn it on in
@@ -30,9 +35,14 @@ during integration testing of location-aware apps. It's a GUI wrapper around
 
 ## Usage
 
+Run `Spoofer.exe`, or from source:
+
 ```powershell
 python gps_injector.py
 ```
+
+Windows SmartScreen may warn about the unsigned .exe the first time; choose
+**More info → Run anyway**.
 
 1. **iOS 17+:** click **Start tunnel (admin)** and approve the UAC prompt (or run
    `python -m pymobiledevice3 remote tunneld` in an admin shell). Keep that window open and
@@ -57,11 +67,11 @@ location is set it can lock.
 
 ```powershell
 pip install pyinstaller
-pyinstaller --onefile --windowed --name GPSInjector gps_injector.py
+pyinstaller Spoofer.spec
 ```
 
-The executable lands in `dist\GPSInjector.exe`. pymobiledevice3 still has to be installed on
-the machine running it.
+The executable lands in `dist\Spoofer.exe`, with the icon from `assets/icon.ico` embedded.
+pymobiledevice3 still has to be installed on the machine running it.
 
 ## Troubleshooting
 

@@ -1,11 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
+# Build with:  pyinstaller Spoofer.spec   ->  dist\Spoofer.exe
 
 
 a = Analysis(
     ['gps_injector.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('assets/icon.ico', 'assets')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -22,7 +23,8 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='GPSInjector',
+    name='Spoofer',
+    icon='assets/icon.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

@@ -29,7 +29,13 @@ import urllib.parse
 import urllib.request
 from tkinter import messagebox, simpledialog, ttk
 
-APP_TITLE = "GPS Injector (pymobiledevice3)"
+APP_TITLE = "Spoofer"
+
+
+def resource_path(rel):
+    """Path to a bundled file, both from source and inside a PyInstaller --onefile exe."""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, rel)
 
 # Benchmark waypoints for QA. The last group covers edge cases that tend to
 # break geo code (null island, antimeridian, near-polar, southern/western hemi).
@@ -356,6 +362,10 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(APP_TITLE)
+        try:
+            self.iconbitmap(default=resource_path(os.path.join("assets", "icon.ico")))
+        except tk.TclError:
+            pass  # icon missing: keep Tk's default rather than fail
         self.geometry("880x820")
         self.minsize(720, 640)
 
@@ -1115,4 +1125,9 @@ class App(tk.Tk):
 
 
 if __name__ == "__main__":
+    if os.name == "nt":
+        import ctypes
+
+        # Give the app its own taskbar identity so Windows shows our icon, not python.exe's.
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Spoofer.GPS")
     App().mainloop()
