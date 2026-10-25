@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# Build with:  pyinstaller Spoofer.spec   ->  dist\Ghost.exe
+# Build with:  pyinstaller Ghost.spec   ->  dist\Ghost.exe
 
 
 a = Analysis(

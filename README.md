@@ -107,7 +107,7 @@ dwell time and a generous start distance for realistic results.
 
 ```powershell
 pip install pyinstaller
-pyinstaller Spoofer.spec
+pyinstaller Ghost.spec
 ```
 
 The executable lands in `dist\Ghost.exe`, with the icon from `assets/icon.ico` embedded.
