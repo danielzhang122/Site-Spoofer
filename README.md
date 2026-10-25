@@ -2,7 +2,7 @@
 
 # Globe Ghost
 
-**[⬇ Download Spoofer.exe](https://github.com/danielzhang122/globe-ghost/releases/latest)** (Windows)
+**[⬇ Download Ghost.exe](https://github.com/danielzhang122/globe-ghost/releases/latest)** (Windows)
 
 A Windows desktop app (Tkinter) for setting a simulated GPS location on an iOS device
 during integration testing of location-aware apps. It's a GUI wrapper around
@@ -47,7 +47,7 @@ during integration testing of location-aware apps. It's a GUI wrapper around
 
 ## Usage
 
-Run `Spoofer.exe`, or from source:
+Run `Ghost.exe`, or from source:
 
 ```powershell
 python gps_injector.py
@@ -110,7 +110,7 @@ pip install pyinstaller
 pyinstaller Spoofer.spec
 ```
 
-The executable lands in `dist\Spoofer.exe` (it keeps its original name), with the icon from `assets/icon.ico` embedded.
+The executable lands in `dist\Ghost.exe`, with the icon from `assets/icon.ico` embedded.
 pymobiledevice3 still has to be installed on the machine running it.
 
 ## Project layout
@@ -168,7 +168,7 @@ Globe Ghost is a front end; the hard parts are done by these projects and servic
 - **[TkinterMapView](https://github.com/TomSchimansky/TkinterMapView)** by Tom Schimansky (CC0): the map widget.
 - **[Requests](https://github.com/psf/requests)** (Apache-2.0) and **[Pillow](https://github.com/python-pillow/Pillow)**
   (MIT-CMU): tile downloading and image handling for the map.
-- **[PyInstaller](https://pyinstaller.org/)** (GPL-2.0 with bootloader exception): builds `Spoofer.exe`.
+- **[PyInstaller](https://pyinstaller.org/)** (GPL-2.0 with bootloader exception): builds `Ghost.exe`.
 
 Please respect these services' usage policies
 ([OSM tiles](https://operations.osmfoundation.org/policies/tiles/),

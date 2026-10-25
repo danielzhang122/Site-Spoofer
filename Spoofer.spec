@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# Build with:  pyinstaller Spoofer.spec   ->  dist\Spoofer.exe
+# Build with:  pyinstaller Spoofer.spec   ->  dist\Ghost.exe
 
 
 a = Analysis(
@@ -23,7 +23,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='Spoofer',
+    name='Ghost',
     icon='assets/icon.ico',
     debug=False,
     bootloader_ignore_signals=False,
