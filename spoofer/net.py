@@ -14,7 +14,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-USER_AGENT = "Spoofer/1.0 (iOS location QA tool)"
+USER_AGENT = "GlobeGhost/1.0 (iOS location QA tool)"
 
 # OpenStreetMap Nominatim: at most 1 request per second (callers enforce GEOCODE_MIN_INTERVAL).
 GEOCODE_URL = "https://nominatim.openstreetmap.org/search"

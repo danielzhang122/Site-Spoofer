@@ -19,7 +19,7 @@ TUNNELD_URL = f"http://127.0.0.1:{TUNNELD_PORT}/"
 
 # Live sessions: instead of `simulate-location play <gpx>` (which reads the whole route up front),
 # run pymobiledevice3's own CLI with `play` swapped for a loop that takes "lat lon" lines on stdin.
-# Connection handling (--tunnel/--udid, errors) stays exactly the CLI's; Spoofer feeds one point per
+# Connection handling (--tunnel/--udid, errors) stays exactly the CLI's; Globe Ghost feeds one point per
 # tick, so routes can be edited mid-run without dropping the DVT session.
 LIVE_READY = "SPOOFER LIVE READY"
 LIVE_HELPER = r"""
@@ -42,7 +42,7 @@ sys.exit(main())
 """
 # `play` insists its GPX file exists, but the live helper never reads it.
 GPX_PATH = os.path.join(tempfile.gettempdir(), "Spoofer", "route.gpx")
-DUMMY_GPX = ('<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Spoofer" '
+DUMMY_GPX = ('<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Globe Ghost" '
              'xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg><trkpt lat="0" lon="0"/></trkseg></trk></gpx>\n')
 
 

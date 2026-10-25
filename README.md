@@ -1,8 +1,8 @@
-<p align="center"><img src="assets/icon.png" width="128" alt="Spoofer icon"></p>
+<p align="center"><img src="assets/icon.png" width="128" alt="Globe Ghost icon"></p>
 
-# Site Spoofer
+# Globe Ghost
 
-**[⬇ Download Spoofer.exe](https://github.com/danielzhang122/Site-Spoofer/releases/latest)** (Windows)
+**[⬇ Download Spoofer.exe](https://github.com/danielzhang122/globe-ghost/releases/latest)** (Windows)
 
 A Windows desktop app (Tkinter) for setting a simulated GPS location on an iOS device
 during integration testing of location-aware apps. It's a GUI wrapper around
@@ -110,7 +110,7 @@ pip install pyinstaller
 pyinstaller Spoofer.spec
 ```
 
-The executable lands in `dist\Spoofer.exe`, with the icon from `assets/icon.ico` embedded.
+The executable lands in `dist\Spoofer.exe` (it keeps its original name), with the icon from `assets/icon.ico` embedded.
 pymobiledevice3 still has to be installed on the machine running it.
 
 ## Project layout
@@ -142,7 +142,7 @@ pymobiledevice3 still has to be installed on the machine running it.
 
 Ideas that might be added later, with no promises on whether or when:
 
-- **Always-on station**: Spoofer could run around the clock on a Raspberry Pi or an old PC with an old
+- **Always-on station**: Globe Ghost could run around the clock on a Raspberry Pi or an old PC with an old
   iPad/iPhone plugged in over USB, so a location or route keeps playing without tying up a main computer.
   It would probably need:
   - Headless mode: start a location, route or scenario from the command line or a config file, without the window
@@ -154,7 +154,7 @@ Ideas that might be added later, with no promises on whether or when:
 
 ## Credits
 
-Spoofer is a front end; the hard parts are done by these projects and services:
+Globe Ghost is a front end; the hard parts are done by these projects and services:
 
 - **[pymobiledevice3](https://github.com/doronz88/pymobiledevice3)** by doronz88 and contributors
   (GPL-3.0): all communication with the iPhone, including location simulation and the iOS 17+ tunnel.
@@ -162,7 +162,7 @@ Spoofer is a front end; the hard parts are done by these projects and services:
   available under the [Open Database License](https://opendatacommons.org/licenses/odbl/). Used for the
   map tiles, address search and every route.
 - **[Nominatim](https://nominatim.org/)**: address search, via the OpenStreetMap Foundation's public server.
-- **[FOSSGIS e.V.](https://www.fossgis.de/)**: hosts the free public routing servers Spoofer uses:
+- **[FOSSGIS e.V.](https://www.fossgis.de/)**: hosts the free public routing servers Globe Ghost uses:
   - [OSRM](https://github.com/Project-OSRM/osrm-backend) for driving, cycling and fallback walking routes
   - [Valhalla](https://github.com/valhalla/valhalla) for walking routes on footpaths and trails
 - **[TkinterMapView](https://github.com/TomSchimansky/TkinterMapView)** by Tom Schimansky (CC0): the map widget.
@@ -172,5 +172,5 @@ Spoofer is a front end; the hard parts are done by these projects and services:
 
 Please respect these services' usage policies
 ([OSM tiles](https://operations.osmfoundation.org/policies/tiles/),
-[Nominatim](https://operations.osmfoundation.org/policies/nominatim/)). Spoofer sends an identifying
+[Nominatim](https://operations.osmfoundation.org/policies/nominatim/)). Globe Ghost sends an identifying
 User-Agent, limits address searches to one per second and caches map tiles to keep its load light.

@@ -34,7 +34,7 @@ class ScenarioMixin:
         self.sc_text.insert("1.0", SCENARIO_EXAMPLE)
 
     def open_scenario(self):
-        path = filedialog.askopenfilename(filetypes=[("Spoofer scenario", "*.txt"), ("All files", "*.*")])
+        path = filedialog.askopenfilename(filetypes=[("Globe Ghost scenario", "*.txt"), ("All files", "*.*")])
         if not path:
             return
         try:
@@ -50,7 +50,7 @@ class ScenarioMixin:
 
     def save_scenario(self):
         path = filedialog.asksaveasfilename(
-            defaultextension=".txt", filetypes=[("Spoofer scenario", "*.txt")],
+            defaultextension=".txt", filetypes=[("Globe Ghost scenario", "*.txt")],
             initialfile=os.path.basename(self.scenario_path) if self.scenario_path else "scenario.txt")
         if not path:
             return

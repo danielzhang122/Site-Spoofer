@@ -10,7 +10,7 @@ from .routing import ROAM_MODES, route_chunked
 from .tracks import ROAM_STEP_SECONDS, generate_wander, step_m
 
 SCENARIO_EXAMPLE = """\
-# Spoofer scenario - one command per line, '#' starts a comment.
+# Globe Ghost scenario - one command per line, '#' starts a comment.
 # Places: "an address", a bookmark as @Name, or lat, lon
 start "Times Square, New York"
 wait 30s

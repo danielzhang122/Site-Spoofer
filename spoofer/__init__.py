@@ -1,5 +1,5 @@
 """
-Spoofer - Tkinter front end for pymobiledevice3 location simulation on iOS devices.
+Globe Ghost - Tkinter front end for pymobiledevice3 location simulation on iOS devices.
 
 Package layout (no module imports the UI except gps_injector.py):
   geo         pure geometry: distances, resampling, bearings

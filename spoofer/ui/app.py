@@ -31,7 +31,7 @@ from .places import PlacesMixin
 from .roam import RoamMixin
 from .scenario_tab import ScenarioMixin
 
-APP_TITLE = "Spoofer"
+APP_TITLE = "Globe Ghost"
 LOG_COLORS = {"cmd": "#569cd6", "out": "#d4d4d4", "err": "#f48771", "ok": "#6a9955",
               "info": "#dcdcaa", "step": "#9cdcfe", "enter": "#4ec9b0", "exit": "#c586c0"}
 
