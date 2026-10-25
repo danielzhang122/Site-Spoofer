@@ -7,7 +7,7 @@
 A Windows desktop app (Tkinter) for setting a simulated GPS location on an iOS device
 during integration testing of location-aware apps. It's a GUI wrapper around
 [pymobiledevice3](https://github.com/doronz88/pymobiledevice3)'s
-`developer dvt simulate-location` commands. Also happens to be very good at spoofing Pokemon Go. (Allegedly)
+`developer dvt simulate-location` commands. It also happens to be very good at spoofing Pokemon Go. (Allegedly)
 
 ## Features
 
